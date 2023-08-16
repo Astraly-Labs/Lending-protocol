@@ -1,2 +1,2 @@
-# Lprotocol-node-guardians
+# Lending-protocol
 Lending protocol using Pragma (Node Guardians quest)
