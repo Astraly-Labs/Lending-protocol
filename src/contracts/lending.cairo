@@ -4,7 +4,7 @@ use starknet::ContractAddress;
 #[starknet::interface]
 trait ILendingProtocolABI<TContractState> {
     fn deposit(ref self: TContractState, amount: u128);
-    fn withdraw(ref self: TContractState, amount: u128)
+    fn withdraw(ref self: TContractState, amount: u128);
     fn borrow(ref self: TContractState, amount: u128);
     fn repay(ref self: TContractState, amount: u128);
     fn liquidate(ref self: TContractState, user: ContractAddress);
@@ -22,6 +22,7 @@ mod LendingProtocol {
     use Lendingprotocol::interfaces::ISummaryStats::{
         SummaryStatsABIDispatcher, SummaryStatsABIDispatcherTrait
     };
+    use debug::PrintTrait;
     use result::ResultTrait;
     use traits::TryInto;
     use option::OptionTrait;
@@ -83,12 +84,19 @@ mod LendingProtocol {
         amount: u128
     }
     #[derive(Drop, starknet::Event)]
+    struct WithdrawEvent {
+        user: ContractAddress,
+        amount: u128
+    }
+
+    #[derive(Drop, starknet::Event)]
     #[event]
     enum Event {
         DepositEvent: DepositEvent,
         BorrowEvent: BorrowEvent,
         RepayEvent: RepayEvent,
-        LiquidateEvent: LiquidateEvent
+        LiquidateEvent: LiquidateEvent, 
+        WithdrawEvent: WithdrawEvent
     }
 
     #[external(v0)]
@@ -124,6 +132,7 @@ mod LendingProtocol {
                     }
                 );
             self.emit(Event::DepositEvent(DepositEvent { user: caller, amount: amount }));
+            return();
         }
 
         fn withdraw(ref self : ContractState, amount : u128) { 
@@ -131,32 +140,38 @@ mod LendingProtocol {
             let user_balance = self.user_balances_storage.read(caller);
             assert(amount <= user_balance.deposited, 'Not enough deposited');
             let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_ID);
-            let new_debt = user_balance.borrowed*fpow(10,interest_decimals.try_into().unwrap()) + interest.try_into().unwrap(); //10^interest_decimals
+            let new_debt = user_balance.borrowed *fpow(10,interest_decimals.try_into().unwrap()) + interest.try_into().unwrap(); //10^interest_decimals
             let (collateral_price, price_decimals) = get_asset_price(@self, ASSET_ID);
+            
             let collateral_value = user_balance.deposited * collateral_price.try_into().unwrap(); //*10^price_decimals
             let mut collateral_ratio= 0;
-            if (price_decimals.try_into().unwrap()>interest_decimals.try_into().unwrap()){ 
-                collateral_ratio = (collateral_value * 100*fpow(10,converted_price_decimals-converted_interest_decimals)) / (total_debt);
+            let converted_price_decimals: u128 = price_decimals.try_into().unwrap();
+            let converted_interest_decimals : u128 = interest_decimals.try_into().unwrap();
+            let collateral_ratio = if (converted_price_decimals> converted_interest_decimals){ 
+                 let numerator = (collateral_value * 100*fpow(10,converted_price_decimals-converted_interest_decimals));
+                 numerator/ (new_debt)
             }else { 
-                collateral_ratio = (collateral_value * 100) / (total_debt*fpow(10,converted_interest_decimals-converted_price_decimals))
-            }
+                let denominator = (new_debt*fpow(10,converted_interest_decimals-converted_price_decimals));
+                (collateral_value * 100) / denominator
+            };
             
-            assert(collateral_ratio > BORROW_THRESHOLD, 'user below safety ratio');
-            let mut withdrawable = 0;
-            if user_balance.borrowed ==0 { 
-                withdrawable = user_balance.deposited;
-            }else { 
-                withdrawable = (user_balance.deposited/collateral_ratio)*(collateral_ratio-BORROW_THRESHOLD);
-            }
-            assert(withdrawable>=amount, 'amount unsafe to withdraw');
-            self.user_balances_storage.write(caller, UserBalance { deposited: user_balance.deposited-amount, borrowed: user_balance.borrowed });
-            let deposit_token = self.collateral_token_storage.read();
-            let deposit_token_dispatcher = IERC20Dispatcher { contract_address: deposit_token };
-            assert(
-                deposit_token_dispatcher.transfer(caller, amount.into()),
-                'Transfer failed'
-            );
+            // assert(collateral_ratio > BORROW_THRESHOLD, 'user below safety ratio');
+            // let mut withdrawable = 0;
+            // if user_balance.borrowed ==0 { 
+            //     withdrawable = user_balance.deposited;
+            // }else { 
+            //     withdrawable = (user_balance.deposited/collateral_ratio)*(collateral_ratio-BORROW_THRESHOLD);
+            // }
+            // assert(withdrawable>=amount, 'amount unsafe to withdraw');
+            // self.user_balances_storage.write(caller, UserBalance { deposited: user_balance.deposited-amount, borrowed: user_balance.borrowed });
+            // let deposit_token = self.collateral_token_storage.read();
+            // let deposit_token_dispatcher = IERC20Dispatcher { contract_address: deposit_token };
+            // assert(
+            //     deposit_token_dispatcher.transfer(caller, amount.into()),
+            //     'Transfer failed'
+            // );
             self.emit(Event::WithdrawEvent(WithdrawEvent { user: caller, amount: amount }));
+            return();
         }
         fn borrow(ref self: ContractState, amount: u128) {
             let liquidity = self.liquidity_pool_storage.read();
@@ -199,6 +214,7 @@ mod LendingProtocol {
                     }
                 );
             self.emit(Event::BorrowEvent(BorrowEvent { user: caller, amount: amount }));
+            return();
         }
         fn repay(ref self: ContractState, amount: u128) {
             assert(amount > 0, 'Cannot repay 0');
@@ -289,15 +305,16 @@ mod LendingProtocol {
             let converted_collateral_price = collateral_price.try_into().unwrap();
             let collateral_value = user_balance.deposited * converted_collateral_price; //*10^price_decimals
             let total_debt = user_balance.borrowed*fpow(10,converted_interest_decimals) + converted_interest; //*10^interest_decimals
-            let mut collateral_ratio = 0;
-            if (converted_price_decimals>converted_interest_decimals){ 
-                collateral_ratio = (collateral_value * 100*fpow(10,converted_price_decimals-converted_interest_decimals)) / (total_debt);
+            
+            let collateral_ratio = if (converted_price_decimals>converted_interest_decimals){ 
+                (collateral_value * 100*fpow(10,converted_price_decimals-converted_interest_decimals)) / (total_debt)
             }else { 
-                collateral_ratio = (collateral_value * 100) / (total_debt*fpow(10,converted_interest_decimals-converted_price_decimals))
-            }
+                (collateral_value * 100) / (total_debt*fpow(10,converted_interest_decimals-converted_price_decimals))
+            };
             assert(collateral_ratio < LIQUIDATION_THRESHOLD, 'user not below liq threshol');
             self.user_balances_storage.write(caller, UserBalance { deposited: 0, borrowed: 0 });
             self.emit(Event::LiquidateEvent(LiquidateEvent { user: caller, amount: 0 }));
+            return();
         }
     }
     fn compute_interest_rate(self: @ContractState, asset_id: felt252) -> (felt252, felt252) {
