@@ -17,7 +17,7 @@ use starknet::SyscallResultTrait;
 use traits::TryInto;
 use result::ResultTrait;
 use option::OptionTrait;
-const CHAIN_ID: felt252 = 'SN_MAIN';
+const CHAIN_ID: felt252 = 'SN_GOERLI';
 const ASSET_ID: felt252 = 'BTC/USD';
 fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher) {
     let admin =
@@ -69,7 +69,10 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
         contract_address: lending_protocol_address
     };
     token_1.approve(lending_protocol_address, initial_supply);
+    token_1.transfer(lending_protocol_address,initial_supply/10 ); //INTIAL WORKING ENTRY
+
     token_2.approve(lending_protocol_address, initial_supply);
+    token_2.transfer(lending_protocol_address, initial_supply/10); //INIITAL WORKING ENTRY
     return (lending_protocol, token_1, token_2);
 }
 
@@ -86,9 +89,15 @@ fn test_lending_deploy() {
     assert(user.deposited ==10000000, 'wrong deposited value'); 
     assert(lending_protocol.get_total_liquidity()==10000000,'wrong total liquidity');
     assert(lending_protocol.get_total_borrowed()==0, 'wrong total borrowed');
-    //lending_protocol.borrow(8000000); 
-    // assert(lending_protocol.get_user_balance(admin).borrowed==8000000, 'wrong borrowed value')
-
-
-
+    lending_protocol.borrow(8000000); 
+    assert(lending_protocol.get_user_balance(admin).borrowed==8000000, 'wrong borrowed value'); 
+    lending_protocol.withdraw(2000);
+    lending_protocol.repay(6000);
+    assert(lending_protocol.get_user_balance(admin).borrowed==7994000, 'wrong repay value');
+    lending_protocol.liquidate(admin); 
+    assert(lending_protocol.get_total_borrowed()==0, 'liquidation failed');
+    assert(lending_protocol.get_total_liquidity()==10000000, 'wrong liquidity:liquidate'); 
+    assert(lending_protocol.get_user_balance(admin).borrowed==0, 'wrong user balance');
+    assert(lending_protocol.get_user_balance(admin).deposited==0, 'wrong user balance');
+    return();
 }

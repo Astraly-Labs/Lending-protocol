@@ -25,7 +25,6 @@ mod erc_20 {
     use starknet::get_caller_address;
     use starknet::contract_address_const;
     use starknet::ContractAddress;
-    use debug::PrintTrait;
     #[storage]
     struct Storage {
         name: felt252,
