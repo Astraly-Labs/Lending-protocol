@@ -159,7 +159,7 @@ mod LendingProtocol {
             let user_balance = self.user_balances_storage.read(caller);
             assert(amount <= user_balance.deposited, 'Not enough deposited');
             //let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_ID);
-            let (interest, interest_decimals) = (40000,6); //FOR TESTING PURPOSE ONLY 
+            let (interest, interest_decimals) = (40000,6);   //FOR TESTING PURPOSE ONLY, should be remove and use the previous line
             let new_debt = user_balance.borrowed*fpow(10,interest_decimals)
                 + interest.try_into().unwrap()*user_balance.borrowed; 
             //let (collateral_price, price_decimals) = get_asset_price(@self, ASSET_ID);
