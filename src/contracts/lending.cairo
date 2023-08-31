@@ -261,7 +261,7 @@ mod LendingProtocol {
             let liquidity = self.liquidity_pool_storage.read();
             let to_pay = (user_balance.borrowed * fpow(10, converted_decimals) + converted_interest*user_balance.borrowed)
                 / fpow(10, converted_decimals);
-            
+            let interest_amount = converted_interest * user_balance.borrowed;
             if (amount >= to_pay) {
                 borrow_token_dispatcher.transfer_from(caller, recipient, to_pay.into());
 
@@ -276,7 +276,7 @@ mod LendingProtocol {
                             total_borrowed: liquidity.total_borrowed - to_pay,
                         }
                     );
-            } else if (amount >= converted_interest / fpow(10, converted_decimals)) {
+            } else if (amount >= interest_amount / fpow(10, converted_decimals)) {
                 borrow_token_dispatcher.transfer_from(caller, recipient, amount.into());
 
                 self
@@ -287,7 +287,7 @@ mod LendingProtocol {
                             deposited: user_balance.deposited,
                             borrowed: user_balance.borrowed
                                 - amount
-                                - converted_interest / fpow(10, converted_decimals)
+                                - interest_amount / fpow(10, converted_decimals)
                         }
                     );
                 self
@@ -297,7 +297,7 @@ mod LendingProtocol {
                             total_liquidity: liquidity.total_liquidity,
                             total_borrowed: liquidity.total_borrowed
                                 - amount
-                                - converted_interest / fpow(10, converted_decimals, )
+                                - interest_amount / fpow(10, converted_decimals, )
                         }
                     );
             } else {
@@ -311,7 +311,7 @@ mod LendingProtocol {
                         UserBalance {
                             deposited: user_balance.deposited,
                             borrowed: user_balance.borrowed
-                                + (converted_interest / fpow(10, converted_decimals) - amount)
+                                + (interest_amount / fpow(10, converted_decimals) - amount)
                         }
                     );
             }
