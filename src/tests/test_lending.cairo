@@ -4,6 +4,7 @@ use Lendingprotocol::contracts::lending::{
 };
 use Lendingprotocol::interfaces::Pragma::{PragmaOracleDispatcher, PragmaOracleDispatcherTrait, };
 use Lendingprotocol::contracts::erc20::{erc_20, IERC20Dispatcher, IERC20DispatcherTrait};
+use Lendingprotocol::contracts::oracle::Oracle;
 use array::ArrayTrait;
 use starknet::contract_address_const;
 use serde::Serde;
@@ -25,6 +26,12 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
     set_contract_address(admin);
     set_chain_id(CHAIN_ID);
 
+
+    //oracle 
+    let oracle_calldata = ArrayTrait::<felt252>::new();
+    let (oracle_contract_address, _) = deploy_syscall(Oracle::TEST_CLASS_HASH.try_into().unwrap(), 0, oracle_calldata.span(), true
+    )
+        .unwrap_syscall();
     //token 1
     let mut token_1_calldata = ArrayTrait::new();
     let token_1: felt252 = 'Pragma1';
@@ -61,6 +68,7 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
     let collateral_address: ContractAddress = token_2_address;
     borrow_address.serialize(ref constructor_calldata);
     collateral_address.serialize(ref constructor_calldata);
+    oracle_contract_address.serialize(ref constructor_calldata);
     let (lending_protocol_address, _) = deploy_syscall(
         LendingProtocol::TEST_CLASS_HASH.try_into().unwrap(), 0, constructor_calldata.span(), true
     )
@@ -76,6 +84,8 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
     return (lending_protocol, token_1, token_2);
 }
 
+//TO CHECK: VERIFY THE RELATION BETWEEN THE AMOUNT GIVEN IN TOKEN OR PRICE
+
 #[test]
 #[available_gas(1000000000)]
 fn test_lending_deploy() {
@@ -83,18 +93,28 @@ fn test_lending_deploy() {
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
     let (lending_protocol, token_1, token_2) = setup();
     set_contract_address(admin);
-    lending_protocol.deposit(1000000000000); 
+    lending_protocol.deposit(1000000000000);
     token_2.balance_of(admin);
     let user = lending_protocol.get_user_balance(admin);
     assert(user.deposited == 1000000000000, 'wrong deposited value');
     assert(lending_protocol.get_total_liquidity() == 1000000000000, 'wrong total liquidity');
     assert(lending_protocol.get_total_borrowed() == 0, 'wrong total borrowed');
     lending_protocol.borrow(80000000000);
-    assert(lending_protocol.get_user_balance(admin).borrowed == 80000000000, 'wrong borrowed value');
+    assert(
+        lending_protocol.get_user_balance(admin).borrowed == 80000000000, 'wrong borrowed value'
+    );
     lending_protocol.withdraw(20000000000);
-    assert(lending_protocol.get_user_balance(admin).deposited==1000000000000-20000000000, 'wrong withdrawed value');
+    assert(
+        lending_protocol.get_user_balance(admin).deposited == 1000000000000 - 20000000000,
+        'wrong withdrawed value'
+    );
+    lending_protocol.get_user_balance(admin).borrowed.print();
     lending_protocol.repay(60000000000);
-    assert(lending_protocol.get_user_balance(admin).borrowed == 80000000000-60000000000, 'wrong repay value');
+    lending_protocol.get_user_balance(admin).borrowed.print();
+    assert(
+        lending_protocol.get_user_balance(admin).borrowed == 80000000000 - 63200000000,
+        'wrong repay value'
+    );
     lending_protocol.borrow(650000000000);
     lending_protocol.liquidate(admin);
     assert(lending_protocol.get_total_borrowed() == 0, 'liquidation failed');
