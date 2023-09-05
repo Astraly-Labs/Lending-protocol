@@ -226,8 +226,6 @@ mod LendingProtocol {
             let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
             let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
             let new_debt = (amount + user_balance.borrowed) *borrow_price;
-
-
             let collateral_ratio = (user_balance.deposited*collateral_price * 100) / (new_debt);
             assert(collateral_ratio >= BORROW_THRESHOLD, 'not enough collateral');
             let borrow_token = self.borrow_token_storage.read();
@@ -308,7 +306,6 @@ mod LendingProtocol {
             } else {
                 borrow_token_dispatcher.transfer_from(caller, recipient, amount.into());
 
-                //NEED TO HANDLE THE INTEREST DUE REDISTRIBUTION
                 self
                     .user_balances_storage
                     .write(
@@ -336,6 +333,7 @@ mod LendingProtocol {
             let collateral_value = user_balance.deposited * fpow(10, interest_decimals.into());
 
             let mut collateral_ratio = (collateral_value * 100) / new_debt;
+            collateral_ratio.print();
             assert(collateral_ratio < LIQUIDATION_THRESHOLD, 'user not below liq threshol');
             self
                 .liquidity_pool_storage

@@ -20,6 +20,7 @@ use result::ResultTrait;
 use option::OptionTrait;
 const CHAIN_ID: felt252 = 'SN_GOERLI';
 const ASSET_ID: felt252 = 'BTC/USD';
+const BLOCK_TIMESTAMP : u64 = 1693713892;
 fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher) {
     let admin =
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
@@ -84,11 +85,12 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
     return (lending_protocol, token_1, token_2);
 }
 
-//TO CHECK: VERIFY THE RELATION BETWEEN THE AMOUNT GIVEN IN TOKEN OR PRICE
+//TO CHECK: FOR THE LENDING PROTOCOL, WORKING WITH AMOUNTS
 
 #[test]
 #[available_gas(1000000000)]
 fn test_lending_deploy() {
+    set_block_timestamp(BLOCK_TIMESTAMP);
     let admin =
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
     let (lending_protocol, token_1, token_2) = setup();
@@ -108,11 +110,9 @@ fn test_lending_deploy() {
         lending_protocol.get_user_balance(admin).deposited == 1000000000000 - 20000000000,
         'wrong withdrawed value'
     );
-    lending_protocol.get_user_balance(admin).borrowed.print();
     lending_protocol.repay(60000000000);
-    lending_protocol.get_user_balance(admin).borrowed.print();
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == 80000000000 - 63200000000,
+        lending_protocol.get_user_balance(admin).borrowed == 80000000000 - 72960000000,
         'wrong repay value'
     );
     lending_protocol.borrow(650000000000);
