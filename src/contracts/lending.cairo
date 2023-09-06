@@ -19,6 +19,7 @@ trait ILendingProtocolABI<TContractState> {
     fn get_total_liquidity(self: @TContractState) -> u128;
     fn get_total_borrowed(self: @TContractState) -> u128;
     fn get_user_balance(self: @TContractState, user: ContractAddress) -> UserBalance;
+    fn set_init_total_liquidity(ref self: TContractState, initial_liquidity: u128);
     //
     fn deposit(ref self: TContractState, amount: u128);
     fn withdraw(ref self: TContractState, amount: u128);
@@ -67,7 +68,10 @@ mod LendingProtocol {
 
     #[constructor]
     fn constructor(
-        ref self: ContractState, borrow_token: ContractAddress, collateral_token: ContractAddress, oracle_address : ContractAddress
+        ref self: ContractState,
+        borrow_token: ContractAddress,
+        collateral_token: ContractAddress,
+        oracle_address: ContractAddress
     ) {
         self.borrow_token_storage.write(borrow_token);
         self.collateral_token_storage.write(collateral_token);
@@ -125,6 +129,15 @@ mod LendingProtocol {
         fn get_user_balance(self: @ContractState, user: ContractAddress) -> UserBalance {
             self.user_balances_storage.read(user)
         }
+
+        fn set_init_total_liquidity(ref self: ContractState, initial_liquidity: u128) {
+            if (self.liquidity_pool_storage.read().total_liquidity == 0) {
+                let liquidity = LiquidityPool {
+                    total_liquidity: initial_liquidity, total_borrowed: 0
+                };
+                self.liquidity_pool_storage.write(liquidity);
+            }
+        }
         fn deposit(ref self: ContractState, amount: u128) {
             // amount must be multiplied by the scaling factor (10^SCALING_FACTOR_INDEX)
             //This allows to use decimal values for operations 
@@ -134,13 +147,16 @@ mod LendingProtocol {
             let caller = info::get_caller_address();
             let recipient = info::get_contract_address();
             deposit_token_dispatcher.transfer_from(caller, recipient, amount.into());
-
+            //transform the colleteral to include in the total liquidity 
+            let (collateral_price, _) = get_asset_price(@self, ASSET_1);
+            let (borrowed_price, _) = get_asset_price(@self, ASSET_2);
+            let equivalent_borrowed_value = (collateral_price * amount) / borrowed_price;
             let liquidity = self.liquidity_pool_storage.read();
             self
                 .liquidity_pool_storage
                 .write(
                     LiquidityPool {
-                        total_liquidity: liquidity.total_liquidity + amount,
+                        total_liquidity: liquidity.total_liquidity + equivalent_borrowed_value,
                         total_borrowed: liquidity.total_borrowed,
                     }
                 );
@@ -159,29 +175,25 @@ mod LendingProtocol {
         }
 
         fn withdraw(ref self: ContractState, amount: u128) {
+            // amount is logically expressed in collateral
             // amount must be multiplied by the scaling factor (10^SCALING_FACTOR_INDEX)
 
             let caller = info::get_caller_address();
             let user_balance = self.user_balances_storage.read(caller);
+
             assert(amount <= user_balance.deposited, 'Not enough deposited');
 
-    
-            let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_2); 
+            let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_2);
 
-    
             let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
             let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
 
-
-            let new_debt = user_balance.borrowed * borrow_price * ( fpow(10, interest_decimals.into())
-                + interest ) ;
-
-            
-        
-
+            let new_debt = user_balance.borrowed
+                * borrow_price
+                * (fpow(10, interest_decimals.into()) + interest);
             // IN OUR CASE, C_PRICE_DECIMALS = B_PRICE_DECIMALS, SO NO NEED TO HANDLE DECIMALS TRANSFORMATION
 
-            let collateral_value = (user_balance.deposited*collateral_price)
+            let collateral_value = (user_balance.deposited * collateral_price)
                 * fpow(10, interest_decimals.into());
 
             let mut collateral_ratio = (collateral_value * 100) / new_debt;
@@ -191,9 +203,12 @@ mod LendingProtocol {
             let withdrawable = if user_balance.borrowed == 0 {
                 user_balance.deposited
             } else {
-                (user_balance.deposited / collateral_ratio) * (collateral_ratio - BORROW_THRESHOLD)
+                user_balance.deposited
+                    - ((user_balance.borrowed * borrow_price * 100)
+                        / (BORROW_THRESHOLD * collateral_price))
             };
-
+            let test = ((user_balance.borrowed * borrow_price * 100)
+                / (BORROW_THRESHOLD * collateral_price));
             assert(withdrawable >= amount, 'amount unsafe to withdraw');
 
             self
@@ -204,6 +219,18 @@ mod LendingProtocol {
                         deposited: user_balance.deposited - amount, borrowed: user_balance.borrowed
                     }
                 );
+
+            let liquidity = self.liquidity_pool_storage.read();
+            //Convert the amount (collateral) to an amount expressed in borrowed (since the LiquidityPool is an amount of borrowed)
+            let equivalent_borrowed_value = (amount * collateral_price) / (borrow_price);
+            self
+                .liquidity_pool_storage
+                .write(
+                    LiquidityPool {
+                        total_liquidity: liquidity.total_liquidity - equivalent_borrowed_value,
+                        total_borrowed: liquidity.total_borrowed,
+                    }
+                );
             let deposit_token = self.collateral_token_storage.read();
             let deposit_token_dispatcher = IERC20Dispatcher { contract_address: deposit_token };
 
@@ -212,21 +239,29 @@ mod LendingProtocol {
             self.emit(Event::WithdrawEvent(WithdrawEvent { user: caller, amount: amount }));
             return ();
         }
+
+
         fn borrow(ref self: ContractState, amount: u128) {
+            //expressed in borrowed amount
             let liquidity = self.liquidity_pool_storage.read();
             assert(
                 liquidity.total_liquidity - liquidity.total_borrowed >= amount,
                 'Not enough liquidity'
             );
             let caller = info::get_caller_address();
-            let user_balance = self.user_balances_storage.read(caller);
-            assert(amount <= user_balance.deposited, 'Not enough deposited');
-
-
             let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
             let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
-            let new_debt = (amount + user_balance.borrowed) *borrow_price;
-            let collateral_ratio = (user_balance.deposited*collateral_price * 100) / (new_debt);
+            let user_balance = self.user_balances_storage.read(caller);
+            let equivalent_borrowed_amount = (user_balance.deposited * collateral_price)
+                / borrow_price;
+            assert(
+                (user_balance.borrowed + amount) <= equivalent_borrowed_amount,
+                'Not enough deposited'
+            );
+
+            let new_debt = (amount + user_balance.borrowed) * borrow_price;
+            let collateral_ratio = (user_balance.deposited * collateral_price * 100) / (new_debt);
+
             assert(collateral_ratio >= BORROW_THRESHOLD, 'not enough collateral');
             let borrow_token = self.borrow_token_storage.read();
             let borrow_token_dispatcher = IERC20Dispatcher { contract_address: borrow_token };
@@ -253,6 +288,8 @@ mod LendingProtocol {
             return ();
         }
         fn repay(ref self: ContractState, amount: u128) {
+            //expressed in borrowed amount
+
             assert(amount > 0, 'Cannot repay 0');
             let caller = info::get_caller_address();
             let (interest, decimals) = compute_interest_rate(@self, ASSET_2);
@@ -265,21 +302,25 @@ mod LendingProtocol {
                 + interest * user_balance.borrowed)
                 / fpow(10, decimals.into());
             let interest_amount = interest * user_balance.borrowed;
+
+            //in case the user amount is enough to pay both the interest and the borrowed amount
             if (amount >= to_pay) {
                 borrow_token_dispatcher.transfer_from(caller, recipient, to_pay.into());
-
-                self
-                    .user_balances_storage
-                    .write(caller, UserBalance { deposited: user_balance.deposited, borrowed: 0 });
                 self
                     .liquidity_pool_storage
                     .write(
                         LiquidityPool {
-                            total_liquidity: liquidity.total_liquidity,
-                            total_borrowed: liquidity.total_borrowed - to_pay,
+                            total_liquidity: liquidity.total_liquidity + to_pay,
+                            total_borrowed: liquidity.total_borrowed
+                                - user_balance
+                                    .borrowed, //do not consider the interest rate here, since paid
                         }
                     );
+                self
+                    .user_balances_storage
+                    .write(caller, UserBalance { deposited: user_balance.deposited, borrowed: 0 });
             } else if (amount >= interest_amount / fpow(10, decimals.into())) {
+                //in case the user cannot repay borrow + interest, but can repay the interest + a share 
                 borrow_token_dispatcher.transfer_from(caller, recipient, amount.into());
 
                 self
@@ -290,20 +331,23 @@ mod LendingProtocol {
                             deposited: user_balance.deposited,
                             borrowed: user_balance.borrowed
                                 - amount
-                                - interest_amount / fpow(10, decimals.into())
+                                + interest_amount / fpow(10, decimals.into())
                         }
                     );
                 self
                     .liquidity_pool_storage
                     .write(
                         LiquidityPool {
-                            total_liquidity: liquidity.total_liquidity,
+                            total_liquidity: liquidity.total_liquidity
+                                + amount
+                                - interest_amount / fpow(10, decimals.into()),
                             total_borrowed: liquidity.total_borrowed
                                 - amount
-                                - interest_amount / fpow(10, decimals.into() )
+                                + interest_amount / fpow(10, decimals.into())
                         }
                     );
             } else {
+                //if the user cannot repay fully the interest
                 borrow_token_dispatcher.transfer_from(caller, recipient, amount.into());
 
                 self
@@ -316,6 +360,16 @@ mod LendingProtocol {
                                 + (interest_amount / fpow(10, decimals.into()) - amount)
                         }
                     );
+                self
+                    .liquidity_pool_storage
+                    .write(
+                        LiquidityPool {
+                            total_liquidity: liquidity.total_liquidity
+                                - (interest_amount / fpow(10, decimals.into()) - amount),
+                            total_borrowed: liquidity.total_borrowed
+                                + (interest_amount / fpow(10, decimals.into()) - amount)
+                        }
+                    );
             }
 
             self.emit(Event::RepayEvent(RepayEvent { user: caller, amount: amount }));
@@ -323,17 +377,23 @@ mod LendingProtocol {
         fn liquidate(ref self: ContractState, user: ContractAddress) {
             let caller = info::get_caller_address();
             let user_balance = self.user_balances_storage.read(user);
+            let to_take = user_balance.deposited;
             assert(user_balance.deposited > 0, 'User has no collateral');
             let liquidity = self.liquidity_pool_storage.read();
-
+            let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
+            let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
             let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_2);
-            let new_debt = user_balance.borrowed * fpow(10, interest_decimals.into())
-                + interest * user_balance.borrowed;
+            let test = (user_balance.deposited * collateral_price) / borrow_price;
 
-            let collateral_value = user_balance.deposited * fpow(10, interest_decimals.into());
+            let new_debt = user_balance.borrowed
+                * borrow_price
+                * (fpow(10, interest_decimals.into()) + interest);
+
+            let collateral_value = user_balance.deposited
+                * collateral_price
+                * fpow(10, interest_decimals.into());
 
             let mut collateral_ratio = (collateral_value * 100) / new_debt;
-            collateral_ratio.print();
             assert(collateral_ratio < LIQUIDATION_THRESHOLD, 'user not below liq threshol');
             self
                 .liquidity_pool_storage
@@ -344,7 +404,7 @@ mod LendingProtocol {
                     }
                 );
             self.user_balances_storage.write(caller, UserBalance { deposited: 0, borrowed: 0 });
-            self.emit(Event::LiquidateEvent(LiquidateEvent { user: caller, amount: 0 }));
+            self.emit(Event::LiquidateEvent(LiquidateEvent { user: caller, amount: to_take }));
             return ();
         }
     }

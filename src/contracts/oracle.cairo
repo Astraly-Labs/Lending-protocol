@@ -312,8 +312,6 @@ mod Oracle {
     }
 
 
-
-
     #[external(v0)]
     impl IOracleImpl of PragmaOracle<ContractState> {
         //
@@ -433,15 +431,15 @@ mod Oracle {
                         num_sources_aggregated: 0,
                         expiration_timestamp: Option::Some(0),
                     };
-                }, 
-                DataType::GenericEntry(pair_id) =>{ 
+                },
+                DataType::GenericEntry(pair_id) => {
                     return PragmaPricesResponse {
-                    price: 0,
-                    decimals: 0,
-                    last_updated_timestamp: 0,
-                    num_sources_aggregated: 0,
-                    expiration_timestamp: Option::Some(0),
-                };
+                        price: 0,
+                        decimals: 0,
+                        last_updated_timestamp: 0,
+                        num_sources_aggregated: 0,
+                        expiration_timestamp: Option::Some(0),
+                    };
                 }
             }
         }
