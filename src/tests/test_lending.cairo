@@ -2,7 +2,7 @@ use starknet::ContractAddress;
 use Lendingprotocol::contracts::lending::{
     ILendingProtocolABIDispatcherTrait, ILendingProtocolABIDispatcher, LendingProtocol
 };
-use Lendingprotocol::interfaces::Pragma::{PragmaOracleDispatcher, PragmaOracleDispatcherTrait, };
+use Lendingprotocol::interfaces::Pragma::{PragmaOracleDispatcher, PragmaOracleDispatcherTrait, DataType, AggregationMode};
 use Lendingprotocol::contracts::erc20::{erc_20, IERC20Dispatcher, IERC20DispatcherTrait};
 use Lendingprotocol::contracts::oracle::Oracle;
 use array::ArrayTrait;
@@ -13,17 +13,18 @@ use starknet::syscalls::deploy_syscall;
 use starknet::testing::{
     set_caller_address, set_contract_address, set_block_timestamp, set_chain_id
 };
+use alexandria_math::math::fpow;
 use starknet::info;
 use starknet::SyscallResultTrait;
-use traits::TryInto;
+use traits::{TryInto, Into};
 use result::ResultTrait;
 use option::OptionTrait;
 const CHAIN_ID: felt252 = 'SN_GOERLI';
-const ASSET_ID: felt252 = 'BTC/USD';
 const BLOCK_TIMESTAMP: u64 = 1693713892;
 const INITIAL_SUPPLY: u128 = 100000000000000000000000000;
-
-fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher) {
+const ASSET_1: felt252 = 'ASSET1/USD'; //collateral
+const ASSET_2: felt252 = 'ASSET2/USD'; //borrow
+fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher, PragmaOracleDispatcher) {
     let admin =
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
     set_contract_address(admin);
@@ -35,6 +36,7 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
         Oracle::TEST_CLASS_HASH.try_into().unwrap(), 0, oracle_calldata.span(), true
     )
         .unwrap_syscall();
+    let mut oracle = PragmaOracleDispatcher{contract_address : oracle_contract_address};
     //token 1
     let mut token_1_calldata = ArrayTrait::new();
     let token_1: felt252 = 'Pragma1';
@@ -87,7 +89,7 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
     token_2.approve(lending_protocol_address, initial_supply);
     token_2.transfer(lending_protocol_address, d_supply); //INIITAL WORKING ENTRY
     lending_protocol.set_init_total_liquidity(initial_supply.low / 10);
-    return (lending_protocol, token_1, token_2);
+    return (lending_protocol, token_1, token_2, oracle);
 }
 
 //TO CHECK: FOR THE LENDING PROTOCOL, WORKING WITH AMOUNTS
@@ -101,83 +103,91 @@ fn test_lending_deploy() {
     set_block_timestamp(BLOCK_TIMESTAMP);
     let admin =
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
-    let (lending_protocol, token_1, token_2) = setup();
+    let (lending_protocol, token_1, token_2, oracle) = setup();
+
+    //Parameters
+    let collateral_price = oracle.get_data_median(DataType::SpotEntry(ASSET_1));
+    let borrow_price = oracle.get_data_median(DataType::SpotEntry(ASSET_2));
+    let deposited_amount = 100000000;
+    let borrow_amount =300000000;
+    let withdraw_amount = 30000000;
+    let repay_amount = 200000000;
+    
     set_contract_address(admin);
-    lending_protocol.deposit(100000000);
+    lending_protocol.deposit(deposited_amount);
     let user = lending_protocol.get_user_balance(admin);
-    assert(user.deposited == 100000000, 'wrong deposited value');
+    assert(user.deposited == deposited_amount, 'wrong deposited value');
     assert(user.borrowed == 0, 'wrong borrowed value');
-    let equivalent_borrowed_value = (100000000 * 186400000000) / 46700000000;
+    let equivalent_borrowed_value = (deposited_amount * collateral_price.price) / borrow_price.price;
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10 + equivalent_borrowed_value,
         'wrong total liquidity'
     );
     assert(lending_protocol.get_total_borrowed() == 0, 'wrong total borrowed');
-    lending_protocol.borrow(300000000);
+    lending_protocol.borrow(borrow_amount);
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == 300000000,
+        lending_protocol.get_user_balance(admin).borrowed == borrow_amount,
         'wrong borrowed value(borrow)'
     );
     assert(
-        lending_protocol.get_user_balance(admin).deposited == 100000000,
+        lending_protocol.get_user_balance(admin).deposited == deposited_amount,
         'wrong deposited value(borrow)'
     );
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10 + equivalent_borrowed_value,
         'wrong liquidity(borrow)'
     );
-    assert(lending_protocol.get_total_borrowed() == 300000000, 'wrong total borrowed(borrow)');
-    lending_protocol.withdraw(30000000);
+    assert(lending_protocol.get_total_borrowed() == borrow_amount, 'wrong total borrowed(borrow)');
+    lending_protocol.withdraw(withdraw_amount);
     assert(
-        lending_protocol.get_user_balance(admin).deposited == 100000000 - 30000000,
+        lending_protocol.get_user_balance(admin).deposited == deposited_amount - withdraw_amount,
         'wrong user deposit(withdraw)'
     );
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == 300000000,
+        lending_protocol.get_user_balance(admin).borrowed == borrow_amount,
         'wrong user borrowed(withdraw)'
     );
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
             + equivalent_borrowed_value
-            - (30000000 * 186400000000) / (46700000000),
+            - (withdraw_amount * collateral_price.price) / (borrow_price.price),
         'wrong liquidity(withdraw)'
     );
-    assert(lending_protocol.get_total_borrowed() == 300000000, 'wrong total borrowed(withdraw)');
-    lending_protocol.repay(200000000);
+    assert(lending_protocol.get_total_borrowed() == borrow_amount, 'wrong total borrowed(withdraw)');
+    lending_protocol.repay(repay_amount);
     assert(
-        lending_protocol.get_user_balance(admin).deposited == 100000000 - 30000000,
+        lending_protocol.get_user_balance(admin).deposited == deposited_amount - withdraw_amount,
         'wrong user deposit(repay)'
     );
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == 300000000 - 200000000 + 48600000,
+        lending_protocol.get_user_balance(admin).borrowed == borrow_amount - repay_amount + 48600000,
         'wrong user borrowed(repay)'
     );
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
             + equivalent_borrowed_value
-            - (30000000 * 186400000000) / (46700000000)
-            + 200000000
-            - 48600000,
+            - (withdraw_amount * collateral_price.price) / (borrow_price.price)
+            + repay_amount
+            - 48600000, //interest
         'wrong liquidity(repay)'
     );
     assert(
-        lending_protocol.get_total_borrowed() == 300000000 - 200000000 + 48600000,
+        lending_protocol.get_total_borrowed() == borrow_amount - repay_amount + 48600000,
         'wrong total borrowed(repay)'
     );
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == 300000000 - 200000000 + 48600000,
+        lending_protocol.get_user_balance(admin).borrowed == borrow_amount - repay_amount + 48600000,
         'wrong repay value'
     ); //the last element is the interest rate 
     lending_protocol.borrow(100000000);
     lending_protocol.liquidate(admin);
-    lending_protocol.get_total_liquidity().print();
     assert(lending_protocol.get_total_borrowed() == 0, 'liquidation failed');
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
             + equivalent_borrowed_value
-            - (30000000 * 186400000000) / (46700000000)
-            + 200000000
-            - 48600000,
+            - (withdraw_amount * collateral_price.price) / (borrow_price.price)
+            + repay_amount
+            - 48600000, //interests
         'wrong liquidity:liquidate'
     );
     assert(lending_protocol.get_user_balance(admin).borrowed == 0, 'wrong user balance');

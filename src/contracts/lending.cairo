@@ -303,6 +303,7 @@ mod LendingProtocol {
                 / fpow(10, decimals.into());
             let interest_amount = interest * user_balance.borrowed;
 
+
             //in case the user amount is enough to pay both the interest and the borrowed amount
             if (amount >= to_pay) {
                 borrow_token_dispatcher.transfer_from(caller, recipient, to_pay.into());
