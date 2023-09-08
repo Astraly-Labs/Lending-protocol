@@ -148,9 +148,15 @@ mod LendingProtocol {
             let recipient = info::get_contract_address();
             deposit_token_dispatcher.transfer_from(caller, recipient, amount.into());
             //transform the colleteral to include in the total liquidity 
-            let (collateral_price, _) = get_asset_price(@self, ASSET_1);
-            let (borrowed_price, _) = get_asset_price(@self, ASSET_2);
-            let equivalent_borrowed_value = (collateral_price * amount) / borrowed_price;
+            let (collateral_price, collateral_decimals) = get_asset_price(@self, ASSET_1);
+            let (borrowed_price, borrowed_decimals) = get_asset_price(@self, ASSET_2);
+            let equivalent_borrowed_value = if (collateral_decimals >= borrowed_decimals) {
+                (collateral_price * amount)
+                    / (borrowed_price * fpow(10, (collateral_decimals - borrowed_decimals).into()))
+            } else {
+                (collateral_price * amount * fpow(10, (borrowed_decimals - collateral_decimals).into()))
+                    / borrowed_price
+            };
             let liquidity = self.liquidity_pool_storage.read();
             self
                 .liquidity_pool_storage
@@ -185,8 +191,8 @@ mod LendingProtocol {
 
             let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_2);
 
-            let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
-            let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
+            let (collateral_price, collateral_decimals) = get_asset_price(@self, ASSET_1);
+            let (borrow_price, borrow_decimals) = get_asset_price(@self, ASSET_2);
 
             let new_debt = user_balance.borrowed
                 * borrow_price
@@ -195,8 +201,11 @@ mod LendingProtocol {
 
             let collateral_value = (user_balance.deposited * collateral_price)
                 * fpow(10, interest_decimals.into());
-
-            let mut collateral_ratio = (collateral_value * 100) / new_debt;
+            let (collateral_ratio, offset) = if (collateral_decimals >= borrow_decimals) { 
+                ((collateral_value * 100)/(new_debt * fpow(10, (collateral_decimals - borrow_decimals).into())),((user_balance.borrowed * borrow_price * 100)/ (BORROW_THRESHOLD * collateral_price * fpow(10,(collateral_decimals-borrow_decimals).into()))))
+            } else { 
+                ((collateral_value * 100 * fpow(10, (borrow_decimals - collateral_decimals).into()))/(new_debt), ((user_balance.borrowed * borrow_price * 100 * fpow(10, (borrow_decimals - collateral_decimals).into()))/ (BORROW_THRESHOLD * collateral_price )))
+            };
 
             assert(collateral_ratio > BORROW_THRESHOLD, 'user below safety ratio');
 
@@ -204,11 +213,9 @@ mod LendingProtocol {
                 user_balance.deposited
             } else {
                 user_balance.deposited
-                    - ((user_balance.borrowed * borrow_price * 100)
-                        / (BORROW_THRESHOLD * collateral_price))
+                    -offset
             };
-            let test = ((user_balance.borrowed * borrow_price * 100)
-                / (BORROW_THRESHOLD * collateral_price));
+        
             assert(withdrawable >= amount, 'amount unsafe to withdraw');
 
             self
@@ -222,7 +229,12 @@ mod LendingProtocol {
 
             let liquidity = self.liquidity_pool_storage.read();
             //Convert the amount (collateral) to an amount expressed in borrowed (since the LiquidityPool is an amount of borrowed)
-            let equivalent_borrowed_value = (amount * collateral_price) / (borrow_price);
+            
+            let equivalent_borrowed_value = if (collateral_decimals >=borrow_decimals) {
+                (amount * collateral_price) / (borrow_price * fpow(10, (collateral_decimals- borrow_decimals).into()))
+            } else { 
+                (amount * collateral_price * fpow(10, (borrow_decimals - collateral_decimals).into())) / (borrow_price  )
+            };
             self
                 .liquidity_pool_storage
                 .write(
@@ -249,18 +261,27 @@ mod LendingProtocol {
                 'Not enough liquidity'
             );
             let caller = info::get_caller_address();
-            let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
-            let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
+            let (collateral_price, collateral_decimals) = get_asset_price(@self, ASSET_1);
+            let (borrow_price, borrow_decimals) = get_asset_price(@self, ASSET_2);
             let user_balance = self.user_balances_storage.read(caller);
-            let equivalent_borrowed_amount = (user_balance.deposited * collateral_price)
-                / borrow_price;
+            let equivalent_borrowed_amount = if (collateral_decimals >=borrow_decimals) { 
+                (user_balance.deposited * collateral_price)
+                / (borrow_price *fpow(10,(collateral_decimals - borrow_decimals).into()) )
+            } else { 
+                (user_balance.deposited * collateral_price * fpow(10,(borrow_decimals - collateral_decimals).into()))
+                / borrow_price
+            };
             assert(
                 (user_balance.borrowed + amount) <= equivalent_borrowed_amount,
                 'Not enough deposited'
             );
 
             let new_debt = (amount + user_balance.borrowed) * borrow_price;
-            let collateral_ratio = (user_balance.deposited * collateral_price * 100) / (new_debt);
+            let collateral_ratio = if (collateral_decimals >= borrow_decimals) { 
+                (user_balance.deposited * collateral_price * 100) / (new_debt * fpow(10, (collateral_decimals - borrow_decimals).into()))
+            } else {
+                (user_balance.deposited *collateral_price * 100 * fpow(10, (borrow_decimals - collateral_decimals).into())) / (new_debt)
+            };
 
             assert(collateral_ratio >= BORROW_THRESHOLD, 'not enough collateral');
             let borrow_token = self.borrow_token_storage.read();
@@ -302,7 +323,6 @@ mod LendingProtocol {
                 + interest * user_balance.borrowed)
                 / fpow(10, decimals.into());
             let interest_amount = interest * user_balance.borrowed;
-
 
             //in case the user amount is enough to pay both the interest and the borrowed amount
             if (amount >= to_pay) {
@@ -380,8 +400,8 @@ mod LendingProtocol {
             let to_take = user_balance.deposited;
             assert(user_balance.deposited > 0, 'User has no collateral');
             let liquidity = self.liquidity_pool_storage.read();
-            let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
-            let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
+            let (collateral_price, collateral_decimals) = get_asset_price(@self, ASSET_1);
+            let (borrow_price, borrow_decimals) = get_asset_price(@self, ASSET_2);
             let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_2);
             let new_debt = user_balance.borrowed
                 * borrow_price
@@ -391,7 +411,11 @@ mod LendingProtocol {
                 * collateral_price
                 * fpow(10, interest_decimals.into());
 
-            let mut collateral_ratio = (collateral_value * 100) / new_debt;
+            let collateral_ratio = if (collateral_decimals >= borrow_decimals) {
+                (collateral_value * 100) / (new_debt *fpow(10, (collateral_decimals - borrow_decimals).into()))
+                } else {
+                    (collateral_value * 100 * fpow(10, (borrow_decimals - collateral_decimals).into())) / new_debt
+                };
             assert(collateral_ratio < LIQUIDATION_THRESHOLD, 'user not below liq threshol');
             self
                 .liquidity_pool_storage

@@ -2,7 +2,9 @@ use starknet::ContractAddress;
 use Lendingprotocol::contracts::lending::{
     ILendingProtocolABIDispatcherTrait, ILendingProtocolABIDispatcher, LendingProtocol
 };
-use Lendingprotocol::interfaces::Pragma::{PragmaOracleDispatcher, PragmaOracleDispatcherTrait, DataType, AggregationMode};
+use Lendingprotocol::interfaces::Pragma::{
+    PragmaOracleDispatcher, PragmaOracleDispatcherTrait, DataType, AggregationMode
+};
 use Lendingprotocol::contracts::erc20::{erc_20, IERC20Dispatcher, IERC20DispatcherTrait};
 use Lendingprotocol::contracts::oracle::Oracle;
 use array::ArrayTrait;
@@ -24,7 +26,9 @@ const BLOCK_TIMESTAMP: u64 = 1693713892;
 const INITIAL_SUPPLY: u128 = 100000000000000000000000000;
 const ASSET_1: felt252 = 'ASSET1/USD'; //collateral
 const ASSET_2: felt252 = 'ASSET2/USD'; //borrow
-fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher, PragmaOracleDispatcher) {
+fn setup() -> (
+    ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher, PragmaOracleDispatcher
+) {
     let admin =
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
     set_contract_address(admin);
@@ -36,7 +40,7 @@ fn setup() -> (ILendingProtocolABIDispatcher, IERC20Dispatcher, IERC20Dispatcher
         Oracle::TEST_CLASS_HASH.try_into().unwrap(), 0, oracle_calldata.span(), true
     )
         .unwrap_syscall();
-    let mut oracle = PragmaOracleDispatcher{contract_address : oracle_contract_address};
+    let mut oracle = PragmaOracleDispatcher { contract_address: oracle_contract_address };
     //token 1
     let mut token_1_calldata = ArrayTrait::new();
     let token_1: felt252 = 'Pragma1';
@@ -109,16 +113,17 @@ fn test_lending_deploy() {
     let collateral_price = oracle.get_data_median(DataType::SpotEntry(ASSET_1));
     let borrow_price = oracle.get_data_median(DataType::SpotEntry(ASSET_2));
     let deposited_amount = 100000000;
-    let borrow_amount =300000000;
+    let borrow_amount = 300000000;
     let withdraw_amount = 30000000;
     let repay_amount = 200000000;
-    
+
     set_contract_address(admin);
     lending_protocol.deposit(deposited_amount);
     let user = lending_protocol.get_user_balance(admin);
     assert(user.deposited == deposited_amount, 'wrong deposited value');
     assert(user.borrowed == 0, 'wrong borrowed value');
-    let equivalent_borrowed_value = (deposited_amount * collateral_price.price) / borrow_price.price;
+    let equivalent_borrowed_value = (deposited_amount * collateral_price.price)
+        / borrow_price.price;
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10 + equivalent_borrowed_value,
         'wrong total liquidity'
@@ -153,14 +158,18 @@ fn test_lending_deploy() {
             - (withdraw_amount * collateral_price.price) / (borrow_price.price),
         'wrong liquidity(withdraw)'
     );
-    assert(lending_protocol.get_total_borrowed() == borrow_amount, 'wrong total borrowed(withdraw)');
+    assert(
+        lending_protocol.get_total_borrowed() == borrow_amount, 'wrong total borrowed(withdraw)'
+    );
     lending_protocol.repay(repay_amount);
     assert(
         lending_protocol.get_user_balance(admin).deposited == deposited_amount - withdraw_amount,
         'wrong user deposit(repay)'
     );
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == borrow_amount - repay_amount + 48600000,
+        lending_protocol.get_user_balance(admin).borrowed == borrow_amount
+            - repay_amount
+            + 48600000,
         'wrong user borrowed(repay)'
     );
     assert(
@@ -176,7 +185,9 @@ fn test_lending_deploy() {
         'wrong total borrowed(repay)'
     );
     assert(
-        lending_protocol.get_user_balance(admin).borrowed == borrow_amount - repay_amount + 48600000,
+        lending_protocol.get_user_balance(admin).borrowed == borrow_amount
+            - repay_amount
+            + 48600000,
         'wrong repay value'
     ); //the last element is the interest rate 
     lending_protocol.borrow(100000000);
