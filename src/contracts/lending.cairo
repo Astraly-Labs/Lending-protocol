@@ -376,7 +376,6 @@ mod LendingProtocol {
             self.emit(Event::RepayEvent(RepayEvent { user: caller, amount: amount }));
         }
         fn liquidate(ref self: ContractState, user: ContractAddress) {
-            let caller = info::get_caller_address();
             let user_balance = self.user_balances_storage.read(user);
             let to_take = user_balance.deposited;
             assert(user_balance.deposited > 0, 'User has no collateral');
@@ -384,8 +383,6 @@ mod LendingProtocol {
             let (collateral_price, c_price_decimals) = get_asset_price(@self, ASSET_1);
             let (borrow_price, b_price_decimals) = get_asset_price(@self, ASSET_2);
             let (interest, interest_decimals) = compute_interest_rate(@self, ASSET_2);
-            let test = (user_balance.deposited * collateral_price) / borrow_price;
-
             let new_debt = user_balance.borrowed
                 * borrow_price
                 * (fpow(10, interest_decimals.into()) + interest);
@@ -404,8 +401,8 @@ mod LendingProtocol {
                         total_borrowed: liquidity.total_borrowed - user_balance.borrowed
                     }
                 );
-            self.user_balances_storage.write(caller, UserBalance { deposited: 0, borrowed: 0 });
-            self.emit(Event::LiquidateEvent(LiquidateEvent { user: caller, amount: to_take }));
+            self.user_balances_storage.write(user, UserBalance { deposited: 0, borrowed: 0 });
+            self.emit(Event::LiquidateEvent(LiquidateEvent { user: user, amount: to_take }));
             return ();
         }
     }
