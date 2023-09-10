@@ -10,7 +10,9 @@ struct LiquidityPool {
 #[derive(Serde, Copy, Drop, starknet::Store)]
 struct UserBalance {
     deposited: u128,
-    borrowed: u128
+    borrowed: u128, 
+    interests : u128,
+    timestamp : u64
 }
 
 
@@ -55,6 +57,7 @@ mod LendingProtocol {
     const ASSET_1: felt252 = 'ASSET1/USD'; //collateral
     const ASSET_2: felt252 = 'ASSET2/USD'; //borrow
     const ONE_HOUR: u64 = 3600;
+    const ONE_YEAR : u128 = 31536000;
 
 
     #[storage]
@@ -140,6 +143,8 @@ mod LendingProtocol {
         }
         fn deposit(ref self: ContractState, amount: u128) {
             // amount must be multiplied by the scaling factor (10^SCALING_FACTOR_INDEX)
+
+
             //This allows to use decimal values for operations 
             let deposit_token = self.collateral_token_storage.read();
             let deposit_token_dispatcher = IERC20Dispatcher { contract_address: deposit_token };
@@ -173,7 +178,7 @@ mod LendingProtocol {
                 .write(
                     caller,
                     UserBalance {
-                        deposited: user_info.deposited + amount, borrowed: user_info.borrowed
+                        deposited: user_info.deposited + amount, borrowed: user_info.borrowed, interests: user_info.interests, timestamp: user_info.timestamp
                     }
                 );
             self.emit(Event::DepositEvent(DepositEvent { user: caller, amount: amount }));
@@ -223,7 +228,7 @@ mod LendingProtocol {
                 .write(
                     caller,
                     UserBalance {
-                        deposited: user_balance.deposited - amount, borrowed: user_balance.borrowed
+                        deposited: user_balance.deposited - amount, borrowed: user_balance.borrowed, interests: user_balance.interests, timestamp : user_balance.timestamp
                     }
                 );
 
@@ -261,6 +266,7 @@ mod LendingProtocol {
                 'Not enough liquidity'
             );
             let caller = info::get_caller_address();
+            let current_timestamp = info::get_block_timestamp();
             let (collateral_price, collateral_decimals) = get_asset_price(@self, ASSET_1);
             let (borrow_price, borrow_decimals) = get_asset_price(@self, ASSET_2);
             let user_balance = self.user_balances_storage.read(caller);
@@ -288,6 +294,14 @@ mod LendingProtocol {
             let borrow_token_dispatcher = IERC20Dispatcher { contract_address: borrow_token };
             let recipient = info::get_contract_address();
             borrow_token_dispatcher.transfer(caller, amount.into());
+            let (interest, decimals) = compute_interest_rate(@self, ASSET_2);
+
+            //interest computation
+            let new_interest = if (user_balance.timestamp ==0) {
+                0
+            } else { 
+                (interest * user_balance.borrowed * ( current_timestamp - user_balance.timestamp).into())/ (ONE_YEAR *fpow(10, decimals.into()))
+            };
 
             self
                 .liquidity_pool_storage
@@ -302,7 +316,7 @@ mod LendingProtocol {
                 .write(
                     caller,
                     UserBalance {
-                        deposited: user_balance.deposited, borrowed: user_balance.borrowed + amount
+                        deposited: user_balance.deposited, borrowed: user_balance.borrowed + amount, interests : new_interest, timestamp : current_timestamp
                     }
                 );
             self.emit(Event::BorrowEvent(BorrowEvent { user: caller, amount: amount }));
@@ -310,20 +324,21 @@ mod LendingProtocol {
         }
         fn repay(ref self: ContractState, amount: u128) {
             //expressed in borrowed amount
-
             assert(amount > 0, 'Cannot repay 0');
             let caller = info::get_caller_address();
+            let current_timestamp = info::get_block_timestamp();
             let (interest, decimals) = compute_interest_rate(@self, ASSET_2);
             let user_balance = self.user_balances_storage.read(caller);
             let borrow_token = self.borrow_token_storage.read();
             let borrow_token_dispatcher = IERC20Dispatcher { contract_address: borrow_token };
             let recipient = info::get_contract_address();
             let liquidity = self.liquidity_pool_storage.read();
-            let to_pay = (user_balance.borrowed * fpow(10, decimals.into())
-                + interest * user_balance.borrowed)
-                / fpow(10, decimals.into());
-            let interest_amount = interest * user_balance.borrowed;
+            
 
+            //takes the previous interest (in case of multiple borrows or repays) and compute the new interest based on the borrowed balance
+            let interest_amount = user_balance.interests + interest * user_balance.borrowed * (current_timestamp -user_balance.timestamp).into() / (ONE_YEAR* fpow(10, decimals.into()));
+            
+            let to_pay = user_balance.borrowed  + interest_amount;
             //in case the user amount is enough to pay both the interest and the borrowed amount
             if (amount >= to_pay) {
                 borrow_token_dispatcher.transfer_from(caller, recipient, to_pay.into());
@@ -339,8 +354,8 @@ mod LendingProtocol {
                     );
                 self
                     .user_balances_storage
-                    .write(caller, UserBalance { deposited: user_balance.deposited, borrowed: 0 });
-            } else if (amount >= interest_amount / fpow(10, decimals.into())) {
+                    .write(caller, UserBalance { deposited: user_balance.deposited, borrowed: 0, interests : 0, timestamp : 0 });
+            } else if (amount >= interest_amount ) {
                 //in case the user cannot repay borrow + interest, but can repay the interest + a share 
                 borrow_token_dispatcher.transfer_from(caller, recipient, amount.into());
 
@@ -352,7 +367,9 @@ mod LendingProtocol {
                             deposited: user_balance.deposited,
                             borrowed: user_balance.borrowed
                                 - amount
-                                + interest_amount / fpow(10, decimals.into())
+                                + interest_amount, 
+                            interests : 0, 
+                            timestamp : current_timestamp,
                         }
                     );
                 self
@@ -361,10 +378,10 @@ mod LendingProtocol {
                         LiquidityPool {
                             total_liquidity: liquidity.total_liquidity
                                 + amount
-                                - interest_amount / fpow(10, decimals.into()),
+                                - interest_amount,
                             total_borrowed: liquidity.total_borrowed
                                 - amount
-                                + interest_amount / fpow(10, decimals.into())
+                                + interest_amount
                         }
                     );
             } else {
@@ -378,7 +395,9 @@ mod LendingProtocol {
                         UserBalance {
                             deposited: user_balance.deposited,
                             borrowed: user_balance.borrowed
-                                + (interest_amount / fpow(10, decimals.into()) - amount)
+                                + (interest_amount  - amount),
+                            interests : user_balance.interests + interest_amount  - amount,
+                            timestamp : current_timestamp,
                         }
                     );
                 self
@@ -386,9 +405,9 @@ mod LendingProtocol {
                     .write(
                         LiquidityPool {
                             total_liquidity: liquidity.total_liquidity
-                                - (interest_amount / fpow(10, decimals.into()) - amount),
+                                - (interest_amount - amount),
                             total_borrowed: liquidity.total_borrowed
-                                + (interest_amount / fpow(10, decimals.into()) - amount)
+                                + (interest_amount  - amount)
                         }
                     );
             }
@@ -425,7 +444,7 @@ mod LendingProtocol {
                         total_borrowed: liquidity.total_borrowed - user_balance.borrowed
                     }
                 );
-            self.user_balances_storage.write(user, UserBalance { deposited: 0, borrowed: 0 });
+            self.user_balances_storage.write(user, UserBalance { deposited: 0, borrowed: 0, interests : 0, timestamp : 0 });
             self.emit(Event::LiquidateEvent(LiquidateEvent { user: user, amount: to_take }));
             return ();
         }

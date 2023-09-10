@@ -130,6 +130,7 @@ fn test_lending_deploy() {
     );
     assert(lending_protocol.get_total_borrowed() == 0, 'wrong total borrowed');
     lending_protocol.borrow(borrow_amount);
+    set_block_timestamp(BLOCK_TIMESTAMP + 10000);
     assert(
         lending_protocol.get_user_balance(admin).borrowed == borrow_amount,
         'wrong borrowed value(borrow)'
@@ -169,7 +170,7 @@ fn test_lending_deploy() {
     assert(
         lending_protocol.get_user_balance(admin).borrowed == borrow_amount
             - repay_amount
-            + 48600000,
+            + 15410,
         'wrong user borrowed(repay)'
     );
     assert(
@@ -177,17 +178,17 @@ fn test_lending_deploy() {
             + equivalent_borrowed_value
             - (withdraw_amount * collateral_price.price) / (borrow_price.price)
             + repay_amount
-            - 48600000, //interest
+            - 15410, //interest
         'wrong liquidity(repay)'
     );
     assert(
-        lending_protocol.get_total_borrowed() == borrow_amount - repay_amount + 48600000,
+        lending_protocol.get_total_borrowed() == borrow_amount - repay_amount + 15410,
         'wrong total borrowed(repay)'
     );
     assert(
         lending_protocol.get_user_balance(admin).borrowed == borrow_amount
             - repay_amount
-            + 48600000,
+            + 15410,
         'wrong repay value'
     ); //the last element is the interest rate 
     lending_protocol.borrow(100000000);
@@ -198,7 +199,7 @@ fn test_lending_deploy() {
             + equivalent_borrowed_value
             - (withdraw_amount * collateral_price.price) / (borrow_price.price)
             + repay_amount
-            - 48600000, //interests
+            - 15410, //interests
         'wrong liquidity:liquidate'
     );
     assert(lending_protocol.get_user_balance(admin).borrowed == 0, 'wrong user balance');
