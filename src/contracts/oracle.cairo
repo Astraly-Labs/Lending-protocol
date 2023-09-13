@@ -289,7 +289,7 @@ mod Oracle {
 
     #[derive(Drop, starknet::Event)]
     struct CheckpointSpotEntry {
-        pair_id: felt252, 
+        pair_id: felt252,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -532,7 +532,8 @@ mod Oracle {
                     value: 0,
                     aggregation_mode: AggregationMode::Median(()),
                     num_sources_aggregated: 0
-                }, 0
+                },
+                0
             );
         }
 
@@ -543,9 +544,10 @@ mod Oracle {
             assert(1 == 1, 'not allowed');
             return (PossibleEntries::Spot(
                 SpotEntry {
-                    base: BaseEntry {
-                        timestamp: 0, source: 0, publisher: 0
-                    }, price: 0, pair_id: 0, volume: 0
+                    base: BaseEntry { timestamp: 0, source: 0, publisher: 0 },
+                    price: 0,
+                    pair_id: 0,
+                    volume: 0
                 }
             ));
         }

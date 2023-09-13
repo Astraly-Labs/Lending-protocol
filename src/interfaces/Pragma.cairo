@@ -13,7 +13,7 @@ struct BaseEntry {
 
 #[derive(Serde, Drop, Copy)]
 struct GenericEntryStorage {
-    timestamp__value: u256, 
+    timestamp__value: u256,
 }
 
 #[derive(Copy, Drop, Serde)]
@@ -68,12 +68,12 @@ struct eSSVI {
 
 #[derive(Serde, Drop, Copy)]
 struct SpotEntryStorage {
-    timestamp__volume__price: u256, 
+    timestamp__volume__price: u256,
 }
 
 #[derive(Serde, Drop, Copy)]
 struct FutureEntryStorage {
-    timestamp__volume__price: u256, 
+    timestamp__volume__price: u256,
 }
 
 /// Data Types
@@ -227,7 +227,7 @@ trait PragmaOracle<TContractState> {
         checkpoint_index: u64,
         aggregation_mode: AggregationMode
     ) -> Checkpoint;
-    fn get_sources_threshold(self: @TContractState, ) -> u32;
+    fn get_sources_threshold(self: @TContractState,) -> u32;
     fn publish_data(ref self: TContractState, new_entry: PossibleEntries);
     fn publish_data_entries(ref self: TContractState, new_entries: Span<PossibleEntries>);
     fn set_admin_address(ref self: TContractState, new_admin_address: ContractAddress);
