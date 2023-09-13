@@ -376,13 +376,12 @@ mod LendingProtocol {
             let liquidity = self.liquidity_pool_storage.read();
 
             //takes the previous interest (in case of multiple borrows or repays) and compute the new interest based on the borrowed balance
-            let interest_amount = user_balance.interests
+            let interest_amount = user_balance.interests* borrow_price
                 + interest
                     * user_balance.borrowed
                     * borrow_price
                     * (current_timestamp - user_balance.timestamp).into()
                     / (ONE_YEAR * fpow(10, decimals.into()));
-            interest_amount.print();
             let to_pay = user_balance.borrowed + interest_amount;
             //in case the user amount is enough to pay both the interest and the borrowed amount
             if (amount >= to_pay) {
@@ -491,9 +490,7 @@ mod LendingProtocol {
                     / new_debt
             };
 
-            interest_amount.print();
-            new_debt.print();
-            collateral_ratio.print();
+
             assert(collateral_ratio < LIQUIDATION_THRESHOLD, 'user not below liq threshol');
             self
                 .liquidity_pool_storage

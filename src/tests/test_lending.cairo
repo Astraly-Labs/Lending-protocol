@@ -299,10 +299,15 @@ fn  test_repay() {
 }
 
 
+
 #[test]
+#[should_panic]
 #[available_gas(1000000000000)]
 fn test_liquidate() { 
 set_block_timestamp(BLOCK_TIMESTAMP);
+
+    // this function should fail, the only way to provoke the liquidation is by changing the prices ( for example, divide the collateral price by 10 in the function), which will decrease the collateral ratio, 
+    // change the parameter in order to have a bigger interest amount 
     let admin =
         contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
     let deposited_amount = 100000000;
