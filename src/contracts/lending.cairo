@@ -295,7 +295,7 @@ mod LendingProtocol {
             let (collateral_price, collateral_decimals) = get_asset_price(@self, ASSET_1);
             let (borrow_price, borrow_decimals) = get_asset_price(@self, ASSET_2);
             let user_balance = self.user_balances_storage.read(caller);
-            let equivalent_borrowed_amount = if (collateral_decimals >= borrow_decimals) {
+            let equivalent_deposited_amount = if (collateral_decimals >= borrow_decimals) {
                 (user_balance.deposited * collateral_price)
                     / (borrow_price * fpow(10, (collateral_decimals - borrow_decimals).into()))
             } else {
@@ -305,7 +305,7 @@ mod LendingProtocol {
                     / borrow_price
             };
             assert(
-                (user_balance.borrowed + amount) <= equivalent_borrowed_amount,
+                (user_balance.borrowed + amount) <= equivalent_deposited_amount,
                 'Not enough deposited'
             );
             let new_debt = (amount + user_balance.borrowed) * borrow_price;
@@ -332,7 +332,6 @@ mod LendingProtocol {
             } else {
                 (interest
                     * user_balance.borrowed
-                    * borrow_price
                     * (current_timestamp - user_balance.timestamp).into())
                     / (ONE_YEAR * fpow(10, decimals.into()))
             };

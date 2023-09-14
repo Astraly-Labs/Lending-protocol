@@ -273,8 +273,16 @@ fn test_borrow() {
     lending_protocol.deposit(deposited_amount);
     lending_protocol.borrow(borrow_amount);
     set_block_timestamp(BLOCK_TIMESTAMP + 10000);
-    let equivalent_borrowed_value = (deposited_amount * collateral_price.price)
-        / borrow_price.price;
+    let equivalent_deposited_amount = if (collateral_price.decimals >= borrow_price.decimals) {
+        (deposited_amount * collateral_price.price)
+            / (borrow_price.price
+                * fpow(10, (collateral_price.decimals - borrow_price.decimals).into()))
+    } else {
+        (deposited_amount
+            * collateral_price.price
+            * fpow(10, (borrow_price.decimals - collateral_price.decimals).into()))
+            / borrow_price.price
+    };
     assert(
         lending_protocol.get_user_balance(admin).borrowed == borrow_amount,
         'wrong borrowed value(borrow)'
@@ -285,11 +293,68 @@ fn test_borrow() {
     );
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
-            + equivalent_borrowed_value
+            + equivalent_deposited_amount
             - borrow_amount,
         'wrong liquidity(borrow)'
     );
     assert(lending_protocol.get_total_borrowed() == borrow_amount, 'wrong total borrowed(borrow)');
+}
+
+#[test]
+#[available_gas(10000000000000)]
+fn test_multiple_borrow() {
+    set_block_timestamp(BLOCK_TIMESTAMP);
+    let admin =
+        contract_address_const::<0x0092cC9b7756E6667b654C0B16d9695347AF788EFBC00a286efE82a6E46Bce4b>();
+    let deposited_amount = 100000000;
+    let borrow_amount = deposited_amount / 10;
+    let withdraw_amount = deposited_amount / 10;
+    let (lending_protocol, token_1, token_2, oracle) = setup();
+    let collateral_price = oracle.get_data_median(DataType::SpotEntry(ASSET_1));
+    let borrow_price = oracle.get_data_median(DataType::SpotEntry(ASSET_2));
+    set_contract_address(admin);
+    lending_protocol.deposit(deposited_amount);
+    lending_protocol.borrow(borrow_amount);
+    set_block_timestamp(BLOCK_TIMESTAMP + 10000);
+    lending_protocol.borrow(borrow_amount);
+    let interest_rate = 540000000 * 300; //decimals 12
+    let interest_amount = 10000 * interest_rate * borrow_amount / (1000000000000 * 31536000);
+    let equivalent_deposited_amount = if (collateral_price.decimals >= borrow_price.decimals) {
+        (deposited_amount * collateral_price.price)
+            / (borrow_price.price
+                * fpow(10, (collateral_price.decimals - borrow_price.decimals).into()))
+    } else {
+        (deposited_amount
+            * collateral_price.price
+            * fpow(10, (borrow_price.decimals - collateral_price.decimals).into()))
+            / borrow_price.price
+    };
+    assert(
+        lending_protocol.get_user_balance(admin).borrowed == 2 * borrow_amount,
+        'wrong borrowed value(borrow)'
+    );
+    assert(
+        lending_protocol.get_user_balance(admin).deposited == deposited_amount,
+        'wrong deposited value(borrow)'
+    );
+    assert(
+        lending_protocol.get_user_balance(admin).interests == interest_amount,
+        'wrong interests value(borrow)'
+    );
+    assert(
+        lending_protocol.get_user_balance(admin).timestamp == BLOCK_TIMESTAMP + 10000,
+        'wrong timestamp (borrow)'
+    );
+
+    assert(
+        lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
+            + equivalent_deposited_amount
+            - 2 * borrow_amount,
+        'wrong liquidity(borrow)'
+    );
+    assert(
+        lending_protocol.get_total_borrowed() == 2 * borrow_amount, 'wrong total borrowed(borrow)'
+    );
 }
 #[test]
 #[available_gas(10000000000)]
@@ -313,8 +378,16 @@ fn test_repay() {
         * interest_rate
         * lending_protocol.get_user_balance(admin).borrowed
         / (1000000000000 * 31536000);
-    let equivalent_deposited_value = (deposited_amount * collateral_price.price)
-        / borrow_price.price;
+    let equivalent_deposited_amount = if (collateral_price.decimals >= borrow_price.decimals) {
+        (deposited_amount * collateral_price.price)
+            / (borrow_price.price
+                * fpow(10, (collateral_price.decimals - borrow_price.decimals).into()))
+    } else {
+        (deposited_amount
+            * collateral_price.price
+            * fpow(10, (borrow_price.decimals - collateral_price.decimals).into()))
+            / borrow_price.price
+    };
     // CASE 1 : FULL REPAY
     lending_protocol.repay(borrow_amount + interest_amount);
     assert(
@@ -323,13 +396,10 @@ fn test_repay() {
     );
     assert(lending_protocol.get_user_balance(admin).borrowed == 0, 'wrong user borrowed(repay)-1');
     assert(
-        lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10 + equivalent_deposited_value,
+        lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10 + equivalent_deposited_amount,
         'wrong liquidity(repay)'
     );
     assert(lending_protocol.get_total_borrowed() == 0, 'wrong total borrowed(repay)');
-// CASE 2 : PARTIAL REPAY
-
-// CASE 3 : REPAY WITH INTEREST
 }
 
 #[test]
@@ -353,8 +423,16 @@ fn test_repay_2() {
         * interest_rate
         * lending_protocol.get_user_balance(admin).borrowed
         / (1000000000000 * 31536000);
-    let equivalent_deposited_value = (deposited_amount * collateral_price.price)
-        / borrow_price.price;
+    let equivalent_deposited_amount = if (collateral_price.decimals >= borrow_price.decimals) {
+        (deposited_amount * collateral_price.price)
+            / (borrow_price.price
+                * fpow(10, (collateral_price.decimals - borrow_price.decimals).into()))
+    } else {
+        (deposited_amount
+            * collateral_price.price
+            * fpow(10, (borrow_price.decimals - collateral_price.decimals).into()))
+            / borrow_price.price
+    };
     // CASE 2: PARTIAL REPAY 
     lending_protocol.repay(repay_amount);
 
@@ -370,7 +448,7 @@ fn test_repay_2() {
     );
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
-            + equivalent_deposited_value
+            + equivalent_deposited_amount
             + repay_amount
             - borrow_amount
             - interest_amount,
@@ -402,8 +480,16 @@ fn test_repay_3() {
         * interest_rate
         * lending_protocol.get_user_balance(admin).borrowed
         / (1000000000000 * 31536000);
-    let equivalent_deposited_value = (deposited_amount * collateral_price.price)
-        / borrow_price.price;
+    let equivalent_deposited_amount = if (collateral_price.decimals >= borrow_price.decimals) {
+        (deposited_amount * collateral_price.price)
+            / (borrow_price.price
+                * fpow(10, (collateral_price.decimals - borrow_price.decimals).into()))
+    } else {
+        (deposited_amount
+            * collateral_price.price
+            * fpow(10, (borrow_price.decimals - collateral_price.decimals).into()))
+            / borrow_price.price
+    };
     let repay_amount = interest_amount - 10;
     // CASE 2: PARTIAL INTEREST REPAY 
     lending_protocol.repay(repay_amount);
@@ -419,7 +505,7 @@ fn test_repay_3() {
     );
     assert(
         lending_protocol.get_total_liquidity() == INITIAL_SUPPLY / 10
-            + equivalent_deposited_value
+            + equivalent_deposited_amount
             - borrow_amount,
         'wrong liquidity(repay)'
     );
