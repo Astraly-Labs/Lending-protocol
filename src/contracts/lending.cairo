@@ -341,7 +341,7 @@ mod LendingProtocol {
                 .liquidity_pool_storage
                 .write(
                     LiquidityPool {
-                        total_liquidity: liquidity.total_liquidity,
+                        total_liquidity: liquidity.total_liquidity - amount,
                         total_borrowed: liquidity.total_borrowed + amount,
                     }
                 );
@@ -376,10 +376,9 @@ mod LendingProtocol {
             let liquidity = self.liquidity_pool_storage.read();
 
             //takes the previous interest (in case of multiple borrows or repays) and compute the new interest based on the borrowed balance
-            let interest_amount = user_balance.interests* borrow_price
+            let interest_amount = user_balance.interests
                 + interest
                     * user_balance.borrowed
-                    * borrow_price
                     * (current_timestamp - user_balance.timestamp).into()
                     / (ONE_YEAR * fpow(10, decimals.into()));
             let to_pay = user_balance.borrowed + interest_amount;
@@ -390,7 +389,7 @@ mod LendingProtocol {
                     .liquidity_pool_storage
                     .write(
                         LiquidityPool {
-                            total_liquidity: liquidity.total_liquidity + to_pay,
+                            total_liquidity: liquidity.total_liquidity + user_balance.borrowed,
                             total_borrowed: liquidity.total_borrowed
                                 - user_balance
                                     .borrowed, //do not consider the interest rate here, since paid
@@ -449,7 +448,8 @@ mod LendingProtocol {
                     .liquidity_pool_storage
                     .write(
                         LiquidityPool {
-                            total_liquidity: liquidity.total_liquidity - (interest_amount - amount),
+                            total_liquidity: liquidity
+                                .total_liquidity, //here, since we do not consider the interest as part of the liquidity, no changes
                             total_borrowed: liquidity.total_borrowed + (interest_amount - amount)
                         }
                     );
@@ -460,7 +460,7 @@ mod LendingProtocol {
 
 
         fn liquidate(ref self: ContractState, user: ContractAddress) {
-                        let current_timestamp = info::get_block_timestamp();
+            let current_timestamp = info::get_block_timestamp();
 
             let user_balance = self.user_balances_storage.read(user);
             let to_take = user_balance.deposited;
@@ -472,12 +472,10 @@ mod LendingProtocol {
             let interest_amount = user_balance.interests * borrow_price
                 + interest
                     * user_balance.borrowed
-                    * borrow_price
                     * (current_timestamp - user_balance.timestamp).into()
                     / (ONE_YEAR * fpow(10, interest_decimals.into()));
-            let new_debt = user_balance.borrowed
-                * borrow_price
-                * fpow(10, interest_decimals.into()) + interest_amount;
+            let new_debt = user_balance.borrowed * borrow_price * fpow(10, interest_decimals.into())
+                + interest_amount;
             let collateral_value = user_balance.deposited
                 * collateral_price
                 * fpow(10, interest_decimals.into());
@@ -489,7 +487,6 @@ mod LendingProtocol {
                 (collateral_value * 100 * fpow(10, (borrow_decimals - collateral_decimals).into()))
                     / new_debt
             };
-
 
             assert(collateral_ratio < LIQUIDATION_THRESHOLD, 'user not below liq threshol');
             self
