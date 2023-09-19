@@ -351,7 +351,7 @@ mod LendingProtocol {
                     UserBalance {
                         deposited: user_balance.deposited,
                         borrowed: user_balance.borrowed + amount,
-                        interests: new_interest,
+                        interests: user_balance.interests + new_interest,
                         timestamp: current_timestamp
                     }
                 );
